@@ -2,8 +2,18 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Candidate &amp; Logistics Dashboard</title>
+
+  <!-- PWA / add-to-home-screen -->
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#7c3aed" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Candidates" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
   <style>
     /* ============================================================
        "Ultraviolet Muse" — soft muted canvas, glass surfaces,
@@ -222,7 +232,71 @@
       background:rgba(255,255,255,.55);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);}
     footer .dot{color:var(--uv-4);}
 
-    @media (max-width:680px){ .ws-chip{display:none;} .search{width:150px;} }
+    /* save button + toast */
+    .btn-save{border-color:var(--ok);color:var(--ok);background:var(--ok-bg);}
+    .btn-save:hover{background:#d1f6e5;border-color:var(--ok);color:var(--ok);}
+    .btn-save.saved{background:var(--ok);border-color:var(--ok);color:#fff;}
+    #toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);
+      background:var(--ink);color:#fff;padding:11px 20px;border-radius:999px;font-size:13.5px;font-weight:600;
+      box-shadow:0 12px 30px rgba(15,23,42,.3);opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;z-index:60;}
+    #toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+    #toast .tick{color:#5eead4;margin-right:6px;}
+
+    /* ============ MOBILE: card layout (no horizontal scrolling) ============ */
+    @media (max-width:760px){
+      .app{height:100dvh;}
+      .topbar{padding:12px 16px calc(12px);}
+      .brand-block .tag{display:none;}
+      .toolbar{padding:10px 14px;gap:10px;}
+      .filters{gap:7px;width:100%;}
+      .filters-label{display:none;}
+      #filterGroup{width:100%;}
+      #filterGroup .filter-btn{flex:1 1 auto;text-align:center;padding:9px 10px;font-size:12.5px;}
+      .toolbar-right{width:100%;gap:8px;flex-wrap:wrap;}
+      .toolbar-right .search{flex:1 1 100%;width:auto;order:-1;padding:11px 14px;}
+      .toolbar-right .btn{flex:1 1 auto;padding:11px 12px;text-align:center;}
+      .grid-wrap{padding:12px 12px calc(12px + env(safe-area-inset-bottom));}
+
+      /* turn the table into stacked cards */
+      thead{display:none;}
+      .table-card{min-width:0;background:transparent;border:none;box-shadow:none;border-radius:0;overflow:visible;backdrop-filter:none;}
+      table,tbody,tr,td{display:block;width:100%;}
+      tbody tr{position:relative;margin-bottom:14px;padding:16px 14px 8px;border-radius:18px;
+        background:var(--glass-strong);border:1px solid var(--line);box-shadow:var(--shadow);}
+      tbody tr:hover{background:var(--glass-strong);}
+      tbody tr.overdue{box-shadow:var(--shadow),inset 4px 0 0 0 var(--bad);}
+      tbody tr+tr td{border-top:none;}
+      tbody td{border:none;padding:9px 0;border-top:1px solid var(--line-soft);
+        display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:40px;}
+      tbody td::before{content:attr(data-label);flex:0 0 auto;font-size:11px;font-weight:700;
+        text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint);}
+      tbody td.col-idx{display:none;}
+      tbody td select.cell,tbody td input.cell{width:auto;max-width:64%;text-align:right;}
+      tbody td select.cell{text-align:left;}
+
+      /* name = card header */
+      td.m-name{padding:0 40px 10px 0;border-top:none;display:block;}
+      td.m-name::before{display:none;}
+      td.m-name input{width:100%;font-size:18px;font-weight:800;padding:2px 0;border:none;}
+      td.m-name input:focus{box-shadow:none;background:transparent;border-bottom:2px solid var(--uv-3);border-radius:0;}
+
+      /* stacked full-width fields */
+      td.m-stack{flex-direction:column;align-items:stretch;gap:5px;}
+      td.m-stack::before{margin-bottom:0;}
+      td.m-stack input.cell,td.m-stack textarea.cell{width:100%;max-width:100%;text-align:left;
+        border:1px solid var(--line);background:rgba(255,255,255,.6);}
+      td.m-stack textarea.cell{min-height:60px;}
+
+      /* delete button → card corner */
+      td.col-del{position:absolute;top:12px;right:10px;padding:0;border-top:none;width:auto;min-height:0;}
+      td.col-del::before{display:none;}
+      .del-btn{opacity:1;font-size:15px;}
+
+      .add-row{border-radius:16px;padding:15px;}
+      footer{flex-direction:column;gap:2px;text-align:center;padding:10px 14px calc(10px + env(safe-area-inset-bottom));}
+    }
+
+    @media (max-width:680px){ .ws-chip{display:none;} }
     @media (prefers-reduced-motion: reduce){
       *{animation-duration:.001ms !important;animation-iteration-count:1 !important;transition-duration:.001ms !important;}
     }
@@ -273,6 +347,7 @@
       </div>
       <div class="toolbar-right">
         <input id="searchInput" class="search" type="search" placeholder="Search name, role, notes…" />
+        <button id="saveBtn" class="btn btn-save" title="Save all changes">💾 Save</button>
         <button id="exportBtn" class="btn" title="Export this workspace to CSV">Export CSV</button>
         <button id="addRowBtn" class="btn btn-primary">+ Add Candidate</button>
       </div>
@@ -316,6 +391,8 @@
     </footer>
   </div>
 
+  <div id="toast"></div>
+
   <!-- GSAP: progressive enhancement. App is fully functional & styled without it. -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
 <script>
@@ -355,6 +432,28 @@
   function uid(){ return "r_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,7); }
   function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
   function setStatus(msg){ var el=document.getElementById("statusLine"); if(el) el.textContent=msg; }
+
+  var toastTimer=null;
+  function toast(msg){
+    var el=document.getElementById("toast"); if(!el) return;
+    el.innerHTML='<span class="tick">✓</span>'+msg;
+    el.classList.add("show");
+    if(toastTimer) clearTimeout(toastTimer);
+    toastTimer=setTimeout(function(){ el.classList.remove("show"); },1800);
+  }
+
+  // explicit save: flush any pending debounced write and confirm
+  function saveNow(){
+    if(saveTimer){ clearTimeout(saveTimer); saveTimer=null; }
+    persist();
+    toast("All changes saved");
+    var btn=document.getElementById("saveBtn");
+    if(btn){
+      var original=btn.innerHTML;
+      btn.classList.add("saved"); btn.innerHTML="✓ Saved";
+      setTimeout(function(){ btn.classList.remove("saved"); btn.innerHTML=original; },1400);
+    }
+  }
 
   // migrate/normalize a row to the current schema
   function normalizeRow(r){
@@ -446,17 +545,17 @@
     var overdueFlag=isOverdue(row)?'<span class="overdue-flag" title="Overdue">⚠ OVERDUE</span>':"";
     tr.innerHTML=
       '<td class="col-idx">'+displayIndex+"</td>"+
-      '<td><input data-field="name" value="'+esc(row.name)+'" placeholder="Full name" class="cell name" /></td>'+
-      '<td>'+selectHTML("role",row.role,ROLE_OPTIONS,rolePill(row.role))+"</td>"+
-      '<td>'+selectHTML("status",row.status,STATUS_OPTIONS,statusPill(row.status))+"</td>"+
-      '<td><input data-field="respondBy" type="datetime-local" value="'+esc(row.respondBy)+'" class="cell" />'+overdueFlag+"</td>"+
-      '<td>'+selectHTML("commState",row.commState,COMM_OPTIONS,commPill(row.commState))+"</td>"+
-      '<td>'+selectHTML("confirmed",row.confirmed,CONFIRM_OPTIONS,confirmPill(row.confirmed))+"</td>"+
-      '<td class="col-chat">'+selectHTML("groupChat",row.groupChat,CHAT_OPTIONS,chatPill(row.groupChat))+"</td>"+
-      '<td class="col-narrow">'+selectHTML("flight",row.flight,LOGI_OPTIONS,logiPill(row.flight))+"</td>"+
-      '<td class="col-narrow">'+selectHTML("hotel",row.hotel,LOGI_OPTIONS,logiPill(row.hotel))+"</td>"+
-      '<td><input data-field="startDate" type="date" value="'+esc(row.startDate)+'" class="cell" /></td>'+
-      '<td><textarea data-field="notes" rows="1" placeholder="Notes / feedback…" class="cell">'+esc(row.notes)+"</textarea></td>"+
+      '<td class="m-name"><input data-field="name" value="'+esc(row.name)+'" placeholder="Full name" class="cell name" /></td>'+
+      '<td data-label="Role">'+selectHTML("role",row.role,ROLE_OPTIONS,rolePill(row.role))+"</td>"+
+      '<td data-label="Status">'+selectHTML("status",row.status,STATUS_OPTIONS,statusPill(row.status))+"</td>"+
+      '<td class="m-stack" data-label="When to respond"><input data-field="respondBy" type="datetime-local" value="'+esc(row.respondBy)+'" class="cell" />'+overdueFlag+"</td>"+
+      '<td data-label="Comm. state">'+selectHTML("commState",row.commState,COMM_OPTIONS,commPill(row.commState))+"</td>"+
+      '<td data-label="Confirmed">'+selectHTML("confirmed",row.confirmed,CONFIRM_OPTIONS,confirmPill(row.confirmed))+"</td>"+
+      '<td class="col-chat" data-label="Group chat (Makendrie)">'+selectHTML("groupChat",row.groupChat,CHAT_OPTIONS,chatPill(row.groupChat))+"</td>"+
+      '<td class="col-narrow" data-label="Flight">'+selectHTML("flight",row.flight,LOGI_OPTIONS,logiPill(row.flight))+"</td>"+
+      '<td class="col-narrow" data-label="Hotel">'+selectHTML("hotel",row.hotel,LOGI_OPTIONS,logiPill(row.hotel))+"</td>"+
+      '<td class="m-stack" data-label="Start / hire date"><input data-field="startDate" type="date" value="'+esc(row.startDate)+'" class="cell" /></td>'+
+      '<td class="m-stack" data-label="Notes / feedback"><textarea data-field="notes" rows="1" placeholder="Notes / feedback…" class="cell">'+esc(row.notes)+"</textarea></td>"+
       '<td class="col-del"><button data-action="delete" class="del-btn" title="Delete row">✕</button></td>';
     return tr;
   }
@@ -564,8 +663,17 @@
     document.getElementById("searchInput").addEventListener("input",function(e){ searchTerm=e.target.value; render(); });
     document.getElementById("addRowBtn").addEventListener("click",addRow);
     document.getElementById("addRowBtnBottom").addEventListener("click",addRow);
+    document.getElementById("saveBtn").addEventListener("click",saveNow);
     document.getElementById("exportBtn").addEventListener("click",exportCSV);
     document.getElementById("switchUserBtn").addEventListener("click",function(){ persist(); openGate(); });
+  }
+
+  // Guarantee nothing is lost when the app is backgrounded / closed / phone sleeps.
+  function wirePersistenceGuards(){
+    var flush=function(){ if(saveTimer){ clearTimeout(saveTimer); saveTimer=null; } persist(); };
+    window.addEventListener("pagehide",flush);
+    window.addEventListener("beforeunload",flush);
+    document.addEventListener("visibilitychange",function(){ if(document.visibilityState==="hidden") flush(); });
   }
 
   function exportCSV(){
@@ -676,7 +784,7 @@
   }
 
   function init(){
-    wireGate(); wireToolbar(); wireGrid();
+    wireGate(); wireToolbar(); wireGrid(); wirePersistenceGuards();
     var last=readJSON(LAST_USER_KEY,null);
     var profiles=getProfiles();
     if(last&&profiles.indexOf(last)!==-1) enterWorkspace(last);
