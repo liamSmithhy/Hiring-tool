@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Candidate & Logistics Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { 50:'#eff6ff',100:'#dbeafe',500:'#3b82f6',600:'#2563eb',700:'#1d4ed8' }
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    html, body { height: 100%; }
+    /* Sticky header + zebra grid */
+    .grid-scroll { scrollbar-width: thin; }
+    .grid-scroll::-webkit-scrollbar { height: 10px; width: 10px; }
+    .grid-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 6px; }
+    .cell-input { background: transparent; width: 100%; outline: none; }
+    .cell-input:focus { background: #fff; box-shadow: inset 0 0 0 2px #2563eb; border-radius: 4px; }
+    tr.row-overdue { box-shadow: inset 3px 0 0 0 #ef4444; }
+    /* Prevent horizontal page scroll; grid scrolls internally */
+    body { overflow-x: hidden; }
+    .fade-in { animation: fade .18s ease-out; }
+    @keyframes fade { from { opacity: 0; transform: translateY(-2px);} to {opacity:1; transform: none;} }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 antialiased">
+
+  <!-- ============ WORKSPACE SELECTION OVERLAY ============ -->
+  <div id="workspaceGate" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm">
+    <div class="w-full max-w-md rounded-2xl bg-white p-8 shadow-2xl fade-in">
+      <div class="mb-6 text-center">
+        <div class="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-600 text-2xl">🗂️</div>
+        <h1 class="text-2xl font-bold text-slate-900">Choose your workspace</h1>
+        <p class="mt-1 text-sm text-slate-500">Each person's data is stored separately on this device. Pick your profile or create a new one.</p>
+      </div>
+
+      <div id="profileList" class="mb-4 space-y-2 max-h-56 overflow-y-auto"></div>
+
+      <div class="flex gap-2">
+        <input id="newProfileInput" type="text" placeholder="Your name (e.g. Alex)"
+          class="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" />
+        <button id="createProfileBtn"
+          class="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">Enter</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ APP SHELL ============ -->
+  <div id="app" class="hidden flex h-screen flex-col">
+
+    <!-- Top bar -->
+    <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 shadow-sm">
+      <div class="flex items-center gap-3">
+        <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-600 text-lg">🗂️</div>
+        <div>
+          <h1 class="text-base font-bold leading-tight text-slate-900">Candidate &amp; Logistics Dashboard</h1>
+          <p class="text-xs text-slate-500">Track pipelines, follow-ups &amp; travel coordination</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <div class="hidden items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 text-sm sm:flex">
+          <span class="text-slate-500">Workspace:</span>
+          <span id="currentUserLabel" class="font-semibold text-slate-800"></span>
+        </div>
+        <button id="switchUserBtn" class="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">Switch</button>
+      </div>
+    </header>
+
+    <!-- Toolbar: filters + stats + actions -->
+    <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-2.5">
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">Quick filters</span>
+        <div id="filterGroup" class="flex flex-wrap gap-1.5">
+          <button data-filter="all" class="filter-btn rounded-full px-3 py-1.5 text-sm font-medium">All Active <span class="count-badge"></span></button>
+          <button data-filter="needs" class="filter-btn rounded-full px-3 py-1.5 text-sm font-medium">Needs My Response <span class="count-badge"></span></button>
+          <button data-filter="travel" class="filter-btn rounded-full px-3 py-1.5 text-sm font-medium">Pending Travel / Makendrie <span class="count-badge"></span></button>
+          <button data-filter="overdue" class="filter-btn rounded-full px-3 py-1.5 text-sm font-medium">Overdue <span class="count-badge"></span></button>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <input id="searchInput" type="search" placeholder="Search name, role, notes…"
+          class="w-48 rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" />
+        <button id="exportBtn" class="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50" title="Export this workspace to CSV">Export CSV</button>
+        <button id="addRowBtn" class="rounded-lg bg-brand-600 px-3.5 py-1.5 text-sm font-semibold text-white hover:bg-brand-700">+ Add Candidate</button>
+      </div>
+    </div>
+
+    <!-- Data grid -->
+    <main class="grid-scroll flex-1 overflow-auto bg-slate-50 px-4 py-3">
+      <div class="min-w-max overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <table class="w-full border-collapse text-sm">
+          <thead class="sticky top-0 z-10 bg-slate-100 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <tr>
+              <th class="w-10 px-2 py-2.5 text-center">#</th>
+              <th class="min-w-[160px] px-3 py-2.5">Candidate Name</th>
+              <th class="min-w-[150px] px-3 py-2.5">Role / Position</th>
+              <th class="min-w-[130px] px-3 py-2.5">Status / Stage</th>
+              <th class="min-w-[170px] px-3 py-2.5">When to Respond</th>
+              <th class="min-w-[130px] px-3 py-2.5">Comm. State</th>
+              <th class="min-w-[110px] px-3 py-2.5">Confirmed</th>
+              <th class="min-w-[110px] px-3 py-2.5 text-center">Group Chat<br><span class="normal-case text-[10px] text-slate-400">w/ Makendrie</span></th>
+              <th class="w-16 px-2 py-2.5 text-center">Flight</th>
+              <th class="w-16 px-2 py-2.5 text-center">Hotel</th>
+              <th class="min-w-[150px] px-3 py-2.5">Start / Hire Date</th>
+              <th class="min-w-[220px] px-3 py-2.5">Notes / Feedback</th>
+              <th class="w-12 px-2 py-2.5"></th>
+            </tr>
+          </thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+
+      <div id="emptyState" class="hidden py-16 text-center text-slate-400">
+        <div class="mb-2 text-4xl">📭</div>
+        <p class="text-sm">No candidates match this view.</p>
+      </div>
+
+      <button id="addRowBtnBottom" class="mt-3 w-full rounded-xl border-2 border-dashed border-slate-300 py-3 text-sm font-medium text-slate-400 hover:border-brand-400 hover:text-brand-600">
+        + Add another candidate row
+      </button>
+    </main>
+
+    <footer class="flex items-center justify-between border-t border-slate-200 bg-white px-4 py-2 text-xs text-slate-400">
+      <span id="statusLine">Ready.</span>
+      <span>Data saved locally in your browser · Workspace-isolated</span>
+    </footer>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---------- Constants ----------
+  var PROFILES_KEY = "clt_profiles_v1";           // list of workspace names
+  var LAST_USER_KEY = "clt_last_user_v1";         // remember last active
+  var DATA_PREFIX = "clt_data_v1::";              // per-user data key prefix
+
+  var STATUS_OPTIONS = ["New Lead","Interviewing","Offer","Confirmed","On Hold","Rejected"];
+  var STATUS_COLORS = {
+    "New Lead":"bg-slate-100 text-slate-700",
+    "Interviewing":"bg-blue-100 text-blue-700",
+    "Offer":"bg-amber-100 text-amber-700",
+    "Confirmed":"bg-green-100 text-green-700",
+    "On Hold":"bg-purple-100 text-purple-700",
+    "Rejected":"bg-red-100 text-red-700"
+  };
+  var CONFIRM_OPTIONS = ["Pending","Yes","No"];
+  var COMM_OPTIONS = ["Needs Response","Waiting for Response","—"];
+  var YESNO_OPTIONS = ["No","Yes"];
+
+  // ---------- State ----------
+  var currentUser = null;
+  var rows = [];               // in-memory rows for current user
+  var activeFilter = "all";
+  var searchTerm = "";
+
+  // ---------- Storage helpers ----------
+  function readJSON(key, fallback) {
+    try { var v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
+    catch (e) { return fallback; }
+  }
+  function writeJSON(key, val) {
+    try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {}
+  }
+  function getProfiles() { return readJSON(PROFILES_KEY, []); }
+  function saveProfiles(list) { writeJSON(PROFILES_KEY, list); }
+  function dataKeyFor(user) { return DATA_PREFIX + user; }
+
+  function loadUserData(user) { return readJSON(dataKeyFor(user), []); }
+  function persist() {
+    if (!currentUser) return;
+    writeJSON(dataKeyFor(currentUser), rows);
+    setStatus("Saved · " + rows.length + " candidate" + (rows.length === 1 ? "" : "s"));
+  }
+
+  // ---------- Utilities ----------
+  function uid() { return "r_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7); }
+  function esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+      .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+  }
+  function setStatus(msg) {
+    var el = document.getElementById("statusLine");
+    if (el) el.textContent = msg;
+  }
+  function isOverdue(row) {
+    if (!row.respondBy) return false;
+    if (row.commState === "Waiting for Response") return false; // ball is in their court
+    if (row.status === "Confirmed" || row.status === "Rejected") return false;
+    var due = new Date(row.respondBy);
+    if (isNaN(due.getTime())) return false;
+    return due.getTime() < Date.now();
+  }
+  function needsResponse(row) {
+    if (row.status === "Rejected") return false;
+    if (row.commState === "Needs Response") return true;
+    return isOverdue(row);
+  }
+  function pendingTravel(row) {
+    if (row.status === "Rejected") return false;
+    var needsChat = !row.groupChat && (row.flight === "Yes" || row.hotel === "Yes");
+    var logisticsUnset = (row.flight === "Yes" || row.hotel === "Yes") && row.confirmed !== "Yes";
+    return needsChat || logisticsUnset;
+  }
+  function isActive(row) {
+    return row.status !== "Rejected";
+  }
+
+  // ---------- Row factory ----------
+  function newRow() {
+    return {
+      id: uid(),
+      name: "",
+      role: "",
+      status: "New Lead",
+      respondBy: "",
+      commState: "Needs Response",
+      confirmed: "Pending",
+      groupChat: false,
+      flight: "No",
+      hotel: "No",
+      startDate: "",
+      notes: ""
+    };
+  }
+
+  // ---------- Filtering ----------
+  function visibleRows() {
+    var term = searchTerm.trim().toLowerCase();
+    return rows.filter(function (r) {
+      if (term) {
+        var hay = (r.name + " " + r.role + " " + r.notes + " " + r.status).toLowerCase();
+        if (hay.indexOf(term) === -1) return false;
+      }
+      switch (activeFilter) {
+        case "needs": return needsResponse(r);
+        case "travel": return pendingTravel(r);
+        case "overdue": return isOverdue(r);
+        case "all":
+        default: return isActive(r);
+      }
+    });
+  }
+
+  function computeCounts() {
+    return {
+      all: rows.filter(isActive).length,
+      needs: rows.filter(needsResponse).length,
+      travel: rows.filter(pendingTravel).length,
+      overdue: rows.filter(isOverdue).length
+    };
+  }
+
+  // ---------- Rendering ----------
+  function selectHTML(field, value, options, extraClass) {
+    var opts = options.map(function (o) {
+      return '<option value="' + esc(o) + '"' + (o === value ? " selected" : "") + ">" + esc(o) + "</option>";
+    }).join("");
+    return '<select data-field="' + field + '" class="cell-input cursor-pointer rounded px-1 py-1 text-sm ' + (extraClass||"") + '">' + opts + "</select>";
+  }
+
+  function statusBadge(status) {
+    var cls = STATUS_COLORS[status] || "bg-slate-100 text-slate-700";
+    return '<span class="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ' + cls + '">' + esc(status) + "</span>";
+  }
+
+  function renderRow(row, displayIndex) {
+    var tr = document.createElement("tr");
+    tr.className = "group border-t border-slate-100 hover:bg-brand-50/40";
+    tr.dataset.id = row.id;
+    if (isOverdue(row)) tr.classList.add("row-overdue");
+
+    var overdueFlag = isOverdue(row)
+      ? '<span class="ml-1 inline-block rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-600" title="Overdue">⚠ OVERDUE</span>'
+      : "";
+
+    var commColor = row.commState === "Needs Response"
+      ? "text-orange-700 font-medium"
+      : (row.commState === "Waiting for Response" ? "text-slate-500" : "text-slate-400");
+
+    tr.innerHTML =
+      '<td class="px-2 py-1.5 text-center text-xs text-slate-400">' + displayIndex + "</td>" +
+
+      '<td class="px-3 py-1.5"><input data-field="name" value="' + esc(row.name) +
+        '" placeholder="Full name" class="cell-input rounded px-1.5 py-1 font-medium text-slate-800" /></td>' +
+
+      '<td class="px-3 py-1.5"><input data-field="role" value="' + esc(row.role) +
+        '" placeholder="Role" class="cell-input rounded px-1.5 py-1" /></td>' +
+
+      '<td class="px-3 py-1.5">' + selectHTML("status", row.status, STATUS_OPTIONS, statusSelectClass(row.status)) + "</td>" +
+
+      '<td class="px-3 py-1.5"><div class="flex flex-col gap-0.5">' +
+        '<input data-field="respondBy" type="datetime-local" value="' + esc(row.respondBy) +
+        '" class="cell-input rounded px-1 py-1 text-xs" />' + overdueFlag + "</div></td>" +
+
+      '<td class="px-3 py-1.5">' + selectHTML("commState", row.commState, COMM_OPTIONS, commColor) + "</td>" +
+
+      '<td class="px-3 py-1.5">' + selectHTML("confirmed", row.confirmed, CONFIRM_OPTIONS, confirmClass(row.confirmed)) + "</td>" +
+
+      '<td class="px-2 py-1.5 text-center">' + groupChatCell(row) + "</td>" +
+
+      '<td class="px-2 py-1.5 text-center">' + selectHTML("flight", row.flight, YESNO_OPTIONS, yesNoClass(row.flight)) + "</td>" +
+      '<td class="px-2 py-1.5 text-center">' + selectHTML("hotel", row.hotel, YESNO_OPTIONS, yesNoClass(row.hotel)) + "</td>" +
+
+      '<td class="px-3 py-1.5"><input data-field="startDate" type="date" value="' + esc(row.startDate) +
+        '" class="cell-input rounded px-1 py-1 text-xs" /></td>' +
+
+      '<td class="px-3 py-1.5"><textarea data-field="notes" rows="1" placeholder="Notes / feedback…" ' +
+        'class="cell-input resize-y rounded px-1.5 py-1 text-sm leading-snug">' + esc(row.notes) + "</textarea></td>" +
+
+      '<td class="px-2 py-1.5 text-center">' +
+        '<button data-action="delete" title="Delete row" ' +
+        'class="rounded p-1 text-slate-300 opacity-0 transition hover:bg-red-50 hover:text-red-500 group-hover:opacity-100">✕</button></td>';
+
+    return tr;
+  }
+
+  function statusSelectClass(status) {
+    var map = {
+      "Confirmed":"text-green-700 font-semibold",
+      "Rejected":"text-red-600",
+      "Offer":"text-amber-700 font-semibold",
+      "Interviewing":"text-blue-700",
+      "On Hold":"text-purple-700"
+    };
+    return map[status] || "text-slate-700";
+  }
+  function confirmClass(v) {
+    if (v === "Yes") return "text-green-700 font-semibold";
+    if (v === "No") return "text-red-600";
+    return "text-amber-600";
+  }
+  function yesNoClass(v) { return v === "Yes" ? "text-green-700 font-semibold" : "text-slate-400"; }
+
+  function groupChatCell(row) {
+    if (row.groupChat) {
+      return '<button data-action="toggleChat" title="Group chat created — click to undo" ' +
+        'class="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-700 hover:bg-green-200">✓ Created</button>';
+    }
+    return '<button data-action="toggleChat" title="Create group chat with Makendrie" ' +
+      'class="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-brand-100 hover:text-brand-700">💬 Make chat</button>';
+  }
+
+  function render() {
+    var body = document.getElementById("tableBody");
+    var list = visibleRows();
+    body.innerHTML = "";
+    list.forEach(function (row, i) {
+      body.appendChild(renderRow(row, i + 1));
+    });
+
+    document.getElementById("emptyState").classList.toggle("hidden", list.length > 0);
+
+    // filter counts + active styling
+    var counts = computeCounts();
+    document.querySelectorAll(".filter-btn").forEach(function (btn) {
+      var f = btn.dataset.filter;
+      var badge = btn.querySelector(".count-badge");
+      if (badge) badge.textContent = counts[f] != null ? " " + counts[f] : "";
+      var active = f === activeFilter;
+      btn.className = "filter-btn rounded-full px-3 py-1.5 text-sm font-medium " +
+        (active ? "bg-brand-600 text-white shadow-sm" : "bg-slate-100 text-slate-600 hover:bg-slate-200");
+    });
+  }
+
+  // ---------- Row mutation ----------
+  function findRow(id) { for (var i = 0; i < rows.length; i++) if (rows[i].id === id) return rows[i]; return null; }
+
+  function addRow() {
+    var r = newRow();
+    rows.unshift(r);
+    persist();
+    // if a filter would hide the fresh empty row, jump to All so the user sees it
+    if (activeFilter !== "all" && activeFilter !== "needs") activeFilter = "all";
+    render();
+    // focus the new row's name field
+    var el = document.querySelector('tr[data-id="' + r.id + '"] input[data-field="name"]');
+    if (el) el.focus();
+    setStatus("New candidate row added.");
+  }
+
+  function deleteRow(id) {
+    var row = findRow(id);
+    var label = row && row.name ? '"' + row.name + '"' : "this row";
+    if (!confirm("Delete " + label + "? This cannot be undone.")) return;
+    rows = rows.filter(function (r) { return r.id !== id; });
+    persist();
+    render();
+  }
+
+  // ---------- Event wiring (delegated) ----------
+  function wireGrid() {
+    var body = document.getElementById("tableBody");
+
+    // input / change on fields
+    body.addEventListener("input", function (e) {
+      var field = e.target.getAttribute("data-field");
+      if (!field) return;
+      var tr = e.target.closest("tr");
+      var row = findRow(tr.dataset.id);
+      if (!row) return;
+      row[field] = e.target.value;
+      // debounce persistence lightly
+      scheduleSave();
+    });
+
+    body.addEventListener("change", function (e) {
+      var field = e.target.getAttribute("data-field");
+      if (!field) return;
+      var tr = e.target.closest("tr");
+      var row = findRow(tr.dataset.id);
+      if (!row) return;
+      row[field] = e.target.value;
+      persist();
+      // status/comm/dates affect flags & filters — re-render row context
+      render();
+    });
+
+    body.addEventListener("click", function (e) {
+      var btn = e.target.closest("[data-action]");
+      if (!btn) return;
+      var tr = e.target.closest("tr");
+      var id = tr.dataset.id;
+      var action = btn.getAttribute("data-action");
+      if (action === "delete") { deleteRow(id); }
+      else if (action === "toggleChat") {
+        var row = findRow(id);
+        if (row) { row.groupChat = !row.groupChat; persist(); render(); }
+      }
+    });
+  }
+
+  var saveTimer = null;
+  function scheduleSave() {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(function () { persist(); }, 500);
+  }
+
+  // ---------- Filters / search / toolbar ----------
+  function wireToolbar() {
+    document.getElementById("filterGroup").addEventListener("click", function (e) {
+      var btn = e.target.closest(".filter-btn");
+      if (!btn) return;
+      activeFilter = btn.dataset.filter;
+      render();
+    });
+    document.getElementById("searchInput").addEventListener("input", function (e) {
+      searchTerm = e.target.value; render();
+    });
+    document.getElementById("addRowBtn").addEventListener("click", addRow);
+    document.getElementById("addRowBtnBottom").addEventListener("click", addRow);
+    document.getElementById("exportBtn").addEventListener("click", exportCSV);
+    document.getElementById("switchUserBtn").addEventListener("click", function () {
+      // flush pending save then return to gate
+      persist();
+      openGate();
+    });
+  }
+
+  // ---------- CSV export ----------
+  function exportCSV() {
+    if (!rows.length) { alert("No rows to export."); return; }
+    var cols = [
+      ["name","Candidate Name"],["role","Role/Position"],["status","Status"],
+      ["respondBy","When to Respond"],["commState","Communication State"],
+      ["confirmed","Confirmed"],["groupChat","Group Chat w/ Makendrie"],
+      ["flight","Flight"],["hotel","Hotel"],["startDate","Start/Hire Date"],["notes","Notes"]
+    ];
+    var lines = [cols.map(function (c) { return csvCell(c[1]); }).join(",")];
+    rows.forEach(function (r) {
+      lines.push(cols.map(function (c) {
+        var v = r[c[0]];
+        if (c[0] === "groupChat") v = v ? "Yes" : "No";
+        return csvCell(v);
+      }).join(","));
+    });
+    var blob = new Blob([lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "candidates_" + currentUser.replace(/[^a-z0-9]/gi, "_") + "_" +
+      new Date().toISOString().slice(0, 10) + ".csv";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setStatus("Exported " + rows.length + " rows to CSV.");
+  }
+  function csvCell(v) {
+    v = v == null ? "" : String(v);
+    if (/[",\r\n]/.test(v)) v = '"' + v.replace(/"/g, '""') + '"';
+    return v;
+  }
+
+  // ---------- Workspace gate ----------
+  function renderProfileList() {
+    var list = getProfiles();
+    var container = document.getElementById("profileList");
+    container.innerHTML = "";
+    if (!list.length) {
+      container.innerHTML = '<p class="rounded-lg bg-slate-50 px-3 py-4 text-center text-xs text-slate-400">No workspaces yet. Create one below to get started.</p>';
+      return;
+    }
+    list.forEach(function (name) {
+      var count = loadUserData(name).length;
+      var wrap = document.createElement("div");
+      wrap.className = "flex items-center gap-2";
+      wrap.innerHTML =
+        '<button data-user="' + esc(name) + '" class="pick-profile flex flex-1 items-center justify-between rounded-lg border border-slate-200 px-3 py-2.5 text-left hover:border-brand-400 hover:bg-brand-50">' +
+          '<span class="flex items-center gap-2">' +
+            '<span class="flex h-8 w-8 items-center justify-center rounded-full bg-brand-100 text-sm font-bold text-brand-700">' +
+              esc(name.slice(0,1).toUpperCase()) + '</span>' +
+            '<span class="font-medium text-slate-800">' + esc(name) + '</span>' +
+          '</span>' +
+          '<span class="text-xs text-slate-400">' + count + ' candidate' + (count === 1 ? '' : 's') + '</span>' +
+        '</button>' +
+        '<button data-del-user="' + esc(name) + '" title="Delete workspace" class="rounded-lg border border-slate-200 px-2 py-2 text-slate-300 hover:border-red-300 hover:text-red-500">🗑</button>';
+      container.appendChild(wrap);
+    });
+  }
+
+  function openGate() {
+    document.getElementById("app").classList.add("hidden");
+    document.getElementById("workspaceGate").classList.remove("hidden");
+    renderProfileList();
+    document.getElementById("newProfileInput").value = "";
+    document.getElementById("newProfileInput").focus();
+  }
+
+  function enterWorkspace(name) {
+    currentUser = name;
+    writeJSON(LAST_USER_KEY, name);
+    rows = loadUserData(name);
+    activeFilter = "all";
+    searchTerm = "";
+    document.getElementById("searchInput").value = "";
+    document.getElementById("currentUserLabel").textContent = name;
+    document.getElementById("workspaceGate").classList.add("hidden");
+    document.getElementById("app").classList.remove("hidden");
+    render();
+    setStatus("Workspace loaded: " + name);
+  }
+
+  function createProfile() {
+    var input = document.getElementById("newProfileInput");
+    var name = input.value.trim();
+    if (!name) { input.focus(); return; }
+    var list = getProfiles();
+    // case-insensitive dedupe
+    var existing = list.filter(function (n) { return n.toLowerCase() === name.toLowerCase(); })[0];
+    if (existing) { enterWorkspace(existing); return; }
+    list.push(name);
+    saveProfiles(list);
+    enterWorkspace(name);
+  }
+
+  function deleteProfile(name) {
+    if (!confirm('Delete workspace "' + name + '" and ALL its candidate data? This cannot be undone.')) return;
+    saveProfiles(getProfiles().filter(function (n) { return n !== name; }));
+    try { localStorage.removeItem(dataKeyFor(name)); } catch (e) {}
+    if (readJSON(LAST_USER_KEY, null) === name) { try { localStorage.removeItem(LAST_USER_KEY); } catch (e) {} }
+    renderProfileList();
+  }
+
+  function wireGate() {
+    document.getElementById("createProfileBtn").addEventListener("click", createProfile);
+    document.getElementById("newProfileInput").addEventListener("keydown", function (e) {
+      if (e.key === "Enter") createProfile();
+    });
+    document.getElementById("profileList").addEventListener("click", function (e) {
+      var pick = e.target.closest(".pick-profile");
+      if (pick) { enterWorkspace(pick.dataset.user); return; }
+      var del = e.target.closest("[data-del-user]");
+      if (del) { deleteProfile(del.getAttribute("data-del-user")); }
+    });
+  }
+
+  // ---------- Init ----------
+  function init() {
+    wireGate();
+    wireToolbar();
+    wireGrid();
+
+    var last = readJSON(LAST_USER_KEY, null);
+    var profiles = getProfiles();
+    if (last && profiles.indexOf(last) !== -1) {
+      enterWorkspace(last);
+    } else {
+      openGate();
+    }
+  }
+
+  document.addEventListener("DOMContentLoaded", init);
+})();
+</script>
+</body>
+</html>
